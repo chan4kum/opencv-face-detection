@@ -44,8 +44,18 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
-# Errors caused by the input itself: retrying cannot help, so fail the job immediately.
-_PERMANENT = (AppError, ObjectNotFoundError)
+
+def _is_permanent(exc: Exception) -> bool:
+    """Errors caused by the input itself (4xx, missing object) cannot succeed on retry: fail the job now.
+
+    5xx ``AppError``s (``OverloadedError``, ``DependencyUnavailableError``) are infrastructure conditions
+    and must be retried; treating them as permanent would fail healthy jobs during a storage outage.
+    """
+    if isinstance(exc, ObjectNotFoundError):
+        return True
+    return isinstance(exc, AppError) and exc.status < 500
+
+
 _FETCH_TIMEOUT_S = 1.0
 
 
@@ -140,11 +150,11 @@ class Worker:
         try:
             data = await self._store.get(job.object_key)
             result, _, _ = await self._inference.detect_bytes(data, source="worker")
-        except _PERMANENT as exc:
-            await self._finish(msg, record, JobStatus.FAILED, error=_public_error(exc), outcome="failed_permanent")
-            await self._cleanup(job)
-            return
         except Exception as exc:
+            if _is_permanent(exc):
+                await self._finish(msg, record, JobStatus.FAILED, error=_public_error(exc), outcome="failed_permanent")
+                await self._cleanup(job)
+                return
             if attempt >= self._s.job_max_deliver:
                 log.error("job_retries_exhausted", job_id=job.job_id, attempt=attempt, error=repr(exc))
                 await self._finish(

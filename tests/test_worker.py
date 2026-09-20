@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from face_detection.api.app import load_detector
+from face_detection.errors import DependencyUnavailableError, OverloadedError
 from face_detection.jobs import JobMessage, JobRecord, JobStatus
 from face_detection.service import InferenceService
 from face_detection.storage import ObjectNotFoundError
@@ -186,3 +187,14 @@ async def test_delete_input_can_be_disabled(two_faces_bytes: bytes) -> None:
     store.objects["inputs/job-1"] = two_faces_bytes
     await worker._process(job_msg())  # type: ignore[arg-type]
     assert store.deleted == [] and "inputs/job-1" in store.objects
+
+
+@pytest.mark.parametrize("error", [DependencyUnavailableError("s3 down"), OverloadedError("busy")])
+async def test_5xx_app_errors_are_retried_not_failed(rig: tuple[Worker, FakeBus, FakeStore], error: Exception) -> None:
+    """Regression: a storage outage (503) must be retried, not recorded as a permanent job failure."""
+    worker, bus, store = rig
+    store.error = error
+    msg = job_msg(attempt=1)
+    await worker._process(msg)  # type: ignore[arg-type]
+    assert msg.calls == [("nak", 0.5)]
+    assert bus.records["job-1"].status is JobStatus.PROCESSING

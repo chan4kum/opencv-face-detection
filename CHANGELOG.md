@@ -4,6 +4,10 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+### Fixed
+- Worker classified every `AppError` as permanent, so an object-store outage would have failed jobs instead of retrying them. Classification is now by status: 4xx permanent, 5xx transient (regression test added).
+- The bug-report issue form was invalid YAML and would have been rejected by GitHub.
+
 ## [1.0.0]
 
 ### Changed
