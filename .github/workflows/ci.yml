@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.1.0
         with: {enable-cache: true}
       - run: uv sync --all-groups
       - run: uv run ruff check .
@@ -35,7 +35,7 @@ jobs:
         python: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.1.0
         with: {enable-cache: true, python-version: "${{ matrix.python }}"}
       - run: uv sync --all-groups
       - run: uv run pytest -m "not integration"
@@ -58,7 +58,7 @@ jobs:
           docker run -d --name seaweedfs -p 8333:8333 -v /tmp/s3.json:/etc/seaweedfs/s3.json:ro \
             chrislusf/seaweedfs:4.47 server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json -master.volumeSizeLimitMB=128 -volume.max=8
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:8333/status >/dev/null && break; sleep 1; done
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.1.0
         with: {enable-cache: true}
       - run: uv sync --all-groups
       - name: Unit + integration with the combined coverage gate
@@ -73,6 +73,7 @@ jobs:
       - uses: azure/setup-helm@v5
       - name: Lint and render
         run: |
+          helm repo add nats https://nats-io.github.io/k8s/helm/charts/
           helm dependency build deploy/helm/face-detection
           HASH=$(printf x | sha256sum | cut -d' ' -f1)
           helm lint deploy/helm/face-detection --strict --set auth.apiKeyHashes=$HASH
@@ -109,18 +110,28 @@ jobs:
           for i in $(seq 1 30); do curl -sf localhost:8000/readyz && break; sleep 1; done
           curl -sf -X POST localhost:8000/v1/detect -H 'Content-Type: image/jpeg' --data-binary @tests/data/two_faces.jpg \
             | python3 -c "import sys,json; d=json.load(sys.stdin); assert len(d['faces'])==2, d"
-      - name: Vulnerability scan (fails on HIGH/CRITICAL with a fix available)
+      - name: Vulnerability scan (SARIF for the Security tab; never fails the job)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: opencv-face-detection:ci
+          version: v0.74.0
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: "1"
+          exit-code: "0"
           format: sarif
           output: trivy.sarif
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with: {sarif_file: trivy.sarif, category: trivy}
+      - name: Vulnerability gate (fails on fixable HIGH/CRITICAL; findings are printed)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: opencv-face-detection:ci
+          version: v0.74.0
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
 
   secrets:
     runs-on: ubuntu-latest

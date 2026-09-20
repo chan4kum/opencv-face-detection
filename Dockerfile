@@ -26,7 +26,10 @@ LABEL org.opencontainers.image.title="opencv-face-detection" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
 
-RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app
+# pip/setuptools/wheel are not needed at runtime (dependencies are pre-installed in the venv): remove them
+# to shrink the attack surface and the vulnerability-scan surface.
+RUN python -m pip uninstall -y pip setuptools wheel >/dev/null 2>&1 || true \
+ && groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
